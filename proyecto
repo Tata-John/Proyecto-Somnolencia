@@ -1,0 +1,84 @@
+#!/usr/bin/env python3
+# -- coding: utf-8 --
+import cv2
+import pygame
+
+# Inicializar Pygame para la alarma
+pygame.mixer.init()
+alarm_sound = pygame.mixer.Sound("alarm.wav")  # Asegurate de tener el archivo alarm.wav en el mismo directorio
+
+# Cargar los clasificadores en cascada
+face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+eye_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_eye.xml')
+
+# Umbral para la somnolencia
+EAR_THRESHOLD = 0.2  # Umbral para la relación de aspecto de los ojos
+CONSEC_FRAMES = 24  # Cuantos frames consecutivos sin ojos abiertos para activar la alarma
+frame_count = 0
+drowsy = False
+
+# Capturar video de la camara
+cap = cv2.VideoCapture(0)
+
+# Reducir la resolución para mejorar el rendimiento
+cap.set(cv2.CAP_PROP_FRAME_WIDTH, 320)
+cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)
+
+# Función para calcular el EAR (Eye Aspect Ratio)
+def eye_aspect_ratio(eye):
+    # Se asume que el contorno de los ojos se da en una lista de puntos
+    A = cv2.norm(eye[1] - eye[5])
+    B = cv2.norm(eye[2] - eye[4])
+    C = cv2.norm(eye[0] - eye[3])
+    ear = (A + B) / (2.0 * C)
+    return ear
+
+while True:
+    ret, frame = cap.read()
+    if not ret:
+        print("Error: No se puede acceder a la camara.")
+        break
+
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+    # Detectar rostros en el fotograma
+    faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
+
+    for (x, y, w, h) in faces:
+        roi_gray = gray[y:y+h, x:x+w]
+        roi_color = frame[y:y+h, x:x+w]
+
+        # Detectar ojos dentro del rostro detectado
+        eyes = eye_cascade.detectMultiScale(roi_gray)
+
+        if len(eyes) < 2:  # Si no se detectan 2 ojos
+            frame_count += 1
+            if frame_count >= CONSEC_FRAMES:
+                if not drowsy:
+                    print("Alerta: La persona esta somnolienta!")
+                    alarm_sound.play(-1)  # Reproducir la alarma en bucle
+                drowsy = True
+        else:
+            frame_count = 0
+            if drowsy:
+                print("La persona ha dejado de estar somnolienta.")
+                alarm_sound.stop()  # Detener la alarma
+            drowsy = False
+
+        # Dibujar el rectangulo alrededor del rostro
+        cv2.rectangle(frame, (x, y), (x + w, y + h), (255, 0, 0), 2)
+
+        # Agregar texto debajo del rectangulo
+        label = "Con somnolencia" if drowsy else "Sin somnolencia"
+        cv2.putText(frame, label, (x, y + h + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+
+    # Mostrar el fotograma en la ventana
+    cv2.imshow('Somnolencia Detectada', frame)
+
+    # Salir del bucle con la tecla 'p'
+    if cv2.waitKey(1) & 0xFF == ord('p'):
+        break
+
+# Liberar la camara y cerrar las ventanas
+cap.release()
+cv2.destroyAllWindows()
